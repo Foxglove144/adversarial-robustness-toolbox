@@ -561,7 +561,11 @@ class PyTorchClassifier(ClassGradientsMixin, ClassifierMixin, PyTorchEstimator):
         self.model.apply(weight_reset)
 
     def class_gradient(  # pylint: disable=W0221
-        self, x: np.ndarray, label: Union[int, List[int], None] = None, training_mode: bool = False, **kwargs
+        self,
+        x: np.ndarray,
+        label: Optional[Union[int, List[int], np.ndarray]] = None,
+        training_mode: bool = False,
+        **kwargs,
     ) -> np.ndarray:
         """
         Compute per-class derivatives w.r.t. `x`.
@@ -598,6 +602,8 @@ class PyTorchClassifier(ClassGradientsMixin, ClassifierMixin, PyTorchEstimator):
                 self.set_batchnorm(train=False)
                 self.set_dropout(train=False)
 
+        if isinstance(label, list):
+            label = np.array(label)
         if not (
             (label is None)
             or (isinstance(label, (int, np.integer)) and label in range(self.nb_classes))
@@ -1047,9 +1053,10 @@ class PyTorchClassifier(ClassGradientsMixin, ClassifierMixin, PyTorchEstimator):
         # pylint: disable=W0212
         # disable pylint because access to _modules required
         torch.save(self._model._model.state_dict(), full_path + ".model")
-        torch.save(self._optimizer.state_dict(), full_path + ".optimizer")  # type: ignore
+        if self._optimizer is not None:
+            torch.save(self._optimizer.state_dict(), full_path + ".optimizer")  # type: ignore
+            logger.info("Optimizer state dict saved in path: %s.", full_path + ".optimizer")
         logger.info("Model state dict saved in path: %s.", full_path + ".model")
-        logger.info("Optimizer state dict saved in path: %s.", full_path + ".optimizer")
 
     def __getstate__(self) -> Dict[str, Any]:
         """
@@ -1094,7 +1101,8 @@ class PyTorchClassifier(ClassGradientsMixin, ClassifierMixin, PyTorchEstimator):
         self._model.to(self._device)
 
         # Recover optimizer
-        self._optimizer.load_state_dict(torch.load(str(full_path) + ".optimizer"))  # type: ignore
+        if os.path.isfile(str(full_path) + ".optimizer"):
+            self._optimizer.load_state_dict(torch.load(str(full_path) + ".optimizer"))  # type: ignore
 
         self.__dict__.pop("model_name", None)
         self.__dict__.pop("inner_model", None)

@@ -294,7 +294,7 @@ class TensorFlowClassifier(ClassGradientsMixin, ClassifierMixin, TensorFlowEstim
             y_preprocessed = np.argmax(y_preprocessed, axis=1)
 
         num_batch = int(np.ceil(len(x_preprocessed) / float(batch_size)))
-        ind = np.arange(len(x_preprocessed))
+        ind = np.arange(len(x_preprocessed)).tolist()
 
         # Start training
         for _ in range(nb_epochs):
@@ -359,7 +359,11 @@ class TensorFlowClassifier(ClassGradientsMixin, ClassifierMixin, TensorFlowEstim
             super().fit_generator(generator, nb_epochs=nb_epochs, **kwargs)
 
     def class_gradient(  # pylint: disable=W0221
-        self, x: np.ndarray, label: Union[int, List[int], None] = None, training_mode: bool = False, **kwargs
+        self,
+        x: np.ndarray,
+        label: Optional[Union[int, List[int], np.ndarray]] = None,
+        training_mode: bool = False,
+        **kwargs,
     ) -> np.ndarray:
         """
         Compute per-class derivatives w.r.t. `x`.
@@ -957,8 +961,9 @@ class TensorFlowV2Classifier(ClassGradientsMixin, ClassifierMixin, TensorFlowV2E
                   shape (nb_samples,).
         :param batch_size: Size of batches.
         :param nb_epochs: Number of epochs to use for training.
-        :param kwargs: Dictionary of framework-specific arguments. This parameter is not currently supported for
-               TensorFlow and providing it takes no effect.
+        :param kwargs: Dictionary of framework-specific arguments. This parameter currently only supports
+                       "scheduler" which is an optional function that will be called at the end of every
+                       epoch to adjust the learning rate.
         """
         import tensorflow as tf
 
@@ -985,6 +990,8 @@ class TensorFlowV2Classifier(ClassGradientsMixin, ClassifierMixin, TensorFlowV2E
         else:
             train_step = self._train_step
 
+        scheduler = kwargs.get("scheduler")
+
         y = check_and_transform_label_format(y, nb_classes=self.nb_classes)
 
         # Apply preprocessing
@@ -996,9 +1003,12 @@ class TensorFlowV2Classifier(ClassGradientsMixin, ClassifierMixin, TensorFlowV2E
 
         train_ds = tf.data.Dataset.from_tensor_slices((x_preprocessed, y_preprocessed)).shuffle(10000).batch(batch_size)
 
-        for _ in range(nb_epochs):
+        for epoch in range(nb_epochs):
             for images, labels in train_ds:
                 train_step(self.model, images, labels)
+
+            if scheduler is not None:
+                scheduler(epoch)
 
     def fit_generator(self, generator: "DataGenerator", nb_epochs: int = 20, **kwargs) -> None:
         """
@@ -1007,8 +1017,9 @@ class TensorFlowV2Classifier(ClassGradientsMixin, ClassifierMixin, TensorFlowV2E
         :param generator: Batch generator providing `(x, y)` for each epoch. If the generator can be used for native
                           training in TensorFlow, it will.
         :param nb_epochs: Number of epochs to use for training.
-        :param kwargs: Dictionary of framework-specific arguments. This parameter is not currently supported for
-               TensorFlow and providing it takes no effect.
+        :param kwargs: Dictionary of framework-specific arguments. This parameter currently only supports
+                       "scheduler" which is an optional function that will be called at the end of every
+                       epoch to adjust the learning rate.
         """
         import tensorflow as tf
         from art.data_generators import TensorFlowV2DataGenerator
@@ -1036,6 +1047,8 @@ class TensorFlowV2Classifier(ClassGradientsMixin, ClassifierMixin, TensorFlowV2E
         else:
             train_step = self._train_step
 
+        scheduler = kwargs.get("scheduler")
+
         # Train directly in TensorFlow
         from art.preprocessing.standardisation_mean_std.tensorflow import StandardisationMeanStdTensorFlow
 
@@ -1050,17 +1063,24 @@ class TensorFlowV2Classifier(ClassGradientsMixin, ClassifierMixin, TensorFlowV2E
                 == (0, 1)
             )
         ):
-            for _ in range(nb_epochs):
+            for epoch in range(nb_epochs):
                 for i_batch, o_batch in generator.iterator:
                     if self._reduce_labels:
                         o_batch = tf.math.argmax(o_batch, axis=1)
                     train_step(self._model, i_batch, o_batch)
+
+                if scheduler is not None:
+                    scheduler(epoch)
         else:
             # Fit a generic data generator through the API
             super().fit_generator(generator, nb_epochs=nb_epochs)
 
     def class_gradient(  # pylint: disable=W0221
-        self, x: np.ndarray, label: Union[int, List[int], None] = None, training_mode: bool = False, **kwargs
+        self,
+        x: np.ndarray,
+        label: Optional[Union[int, List[int], np.ndarray]] = None,
+        training_mode: bool = False,
+        **kwargs,
     ) -> np.ndarray:
         """
         Compute per-class derivatives w.r.t. `x`.
